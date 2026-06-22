@@ -4455,7 +4455,6 @@ function generateDocument(type) {
     }, 100);
     return;
   }
-  }
 
   content.innerHTML = docHtml;
   document.getElementById('print-overlay').classList.add('active');
