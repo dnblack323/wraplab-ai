@@ -904,6 +904,7 @@
               <option value="During photos">During Production/Install</option>
               <option value="After photos">Final Finished Wrap</option>
               <option value="Signed documents">Contract/Signed Paperwork</option>
+              <option value="Final Packets">Final Packets</option>
             </select>
           </div>
           <div class="form-group span-2">
@@ -1122,16 +1123,33 @@
             </div>
           </div>
 
-          <!-- SECTION 5: FINAL PACKETS & AFTERCARE -->
-          <div class="portal-section" id="portal-sec-aftercare">
+          <!-- SECTION 6: PRE-INSTALL WRAP PACKET -->
+          <div class="portal-section" id="portal-sec-pre-install-packet" style="display: none;">
             <div class="portal-section-title">
-              <span>6. Aftercare & Final Wrap Delivery Packets</span>
-              <span id="portal-aftercare-badge" class="badge badge-complete">Completed</span>
+              <span>6. Pre-Install Wrap Packet & Acknowledgment</span>
+              <span id="portal-pre-install-badge" class="badge badge-warning">Awaiting Review</span>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">Your vehicle wrap is fully installed! Clean and protect your wrap with the guidelines below.</p>
-            <div style="display: flex; gap: 12px;">
-              <button class="btn" onclick="generateDocument('aftercare')"><i class="fa-solid fa-download"></i> Download Care Sheet (PDF)</button>
-              <button class="btn" onclick="generateDocument('receipt')"><i class="fa-solid fa-receipt"></i> Get Paid Receipt</button>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">Please review the Pre-Install Wrap Packet containing the scope of work, timeline, preparation checklist, and paint liability terms. You must sign this packet before we can begin production/installation.</p>
+            <div style="display: flex; gap: 12px;" id="portal-pre-install-actions">
+              <button class="btn btn-primary" onclick="generateDocument('pre-install-packet')"><i class="fa-solid fa-file-signature"></i> Review & Sign Pre-Install Packet</button>
+            </div>
+            <div style="display: none; gap: 12px;" id="portal-pre-install-signed-view">
+              <button class="btn btn-success" onclick="generateDocument('pre-install-packet')"><i class="fa-solid fa-file-pdf"></i> View Signed Pre-Install Packet (PDF)</button>
+            </div>
+          </div>
+
+          <!-- SECTION 7: FINAL WRAP COMPLETION & AFTERCARE -->
+          <div class="portal-section" id="portal-sec-final-packet" style="display: none;">
+            <div class="portal-section-title">
+              <span>7. Final Wrap Completion & Aftercare Packet</span>
+              <span id="portal-final-packet-badge" class="badge badge-warning">Awaiting Pickup</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">Your wrap is fully installed! Before picking up your vehicle, please complete the final walk-through, sign the aftercare acknowledgment, and review the wash guidelines.</p>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <button class="btn btn-primary" id="portal-sign-final-btn" onclick="generateDocument('final-packet')"><i class="fa-solid fa-check-double"></i> Review & Sign Final Packet</button>
+              <button class="btn" id="portal-view-final-signed-btn" style="display: none;" onclick="generateDocument('final-packet')"><i class="fa-solid fa-file-pdf"></i> View Signed Final Packet (PDF)</button>
+              <button class="btn" onclick="generateDocument('aftercare')"><i class="fa-solid fa-download"></i> Care Sheet (PDF)</button>
+              <button class="btn" onclick="generateDocument('receipt')"><i class="fa-solid fa-receipt"></i> Paid Receipt</button>
             </div>
           </div>
 

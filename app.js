@@ -627,6 +627,21 @@ function normalizeProjectWorkflowSchema(project) {
   project.installChecklist = Array.isArray(project.installChecklist) ? project.installChecklist : [];
   project.damageMarkers = Array.isArray(project.damageMarkers) ? project.damageMarkers : [];
 
+  project.preInstallPacketSigned = project.preInstallPacketSigned || false;
+  project.preInstallPacketSignedBy = project.preInstallPacketSignedBy || null;
+  project.preInstallPacketSignedDate = project.preInstallPacketSignedDate || null;
+  project.preInstallPacketSigType = project.preInstallPacketSigType || null;
+  project.preInstallPacketSigData = project.preInstallPacketSigData || null;
+  project.preInstallPacketAudit = project.preInstallPacketAudit || null;
+
+  project.finalPacketSigned = project.finalPacketSigned || false;
+  project.finalPacketSignedBy = project.finalPacketSignedBy || null;
+  project.finalPacketSignedDate = project.finalPacketSignedDate || null;
+  project.finalPacketSigType = project.finalPacketSigType || null;
+  project.finalPacketSigData = project.finalPacketSigData || null;
+  project.finalPacketAudit = project.finalPacketAudit || null;
+  project.finalWalkthroughChecked = Array.isArray(project.finalWalkthroughChecked) ? project.finalWalkthroughChecked : [];
+
   project.damageMarkers.forEach(marker => {
     const usesLegacyPixelCoordinates = Number(marker.x) > 100 || Number(marker.y) > 100;
     if (usesLegacyPixelCoordinates) {
@@ -732,11 +747,17 @@ function getWorkflowGateError(project, stageIndex = project.stageIndex) {
     if (!project.inspectionAcknowledged) {
       return "The pre-install damage inspection must be acknowledged by the customer before production.";
     }
+    if (!project.preInstallPacketSigned) {
+      return "The customer must sign the Pre-Install Wrap Packet before the project can release to production.";
+    }
   }
 
   if (stageIndex === 6) {
     if (!project.inspectionAcknowledged) {
       return "Installation prep is locked until the damage inspection is acknowledged.";
+    }
+    if (!project.preInstallPacketSigned) {
+      return "The customer must sign the Pre-Install Wrap Packet before the project can release to production.";
     }
     if (!project.productionChecklist.length || !project.productionChecklist.every(item => item.done)) {
       return "Every production task, including lamination, outgassing, and panel labeling, must be complete before installation.";
@@ -756,6 +777,12 @@ function getWorkflowGateError(project, stageIndex = project.stageIndex) {
     );
     if (missingPhotos.length) {
       return `Pickup is locked. Upload ${missingPhotos.join(", ")} before releasing the vehicle.`;
+    }
+  }
+
+  if (stageIndex === 8) {
+    if (!project.finalPacketSigned) {
+      return "The customer must sign the Final Wrap Completion & Aftercare Packet before the job can be marked Complete.";
     }
   }
 
@@ -3325,12 +3352,50 @@ function openCustomerPortalSim() {
     inspectionSec.style.display = "none";
   }
 
-  // Section 5: Aftercare & final packets
-  const afterSec = document.getElementById('portal-sec-aftercare');
-  if (p.stageIndex >= 8) {
-    afterSec.style.display = "block";
+  // Section 6: Pre-Install Wrap Packet
+  const preInstallSec = document.getElementById('portal-sec-pre-install-packet');
+  const preInstallBadge = document.getElementById('portal-pre-install-badge');
+  const preInstallActions = document.getElementById('portal-pre-install-actions');
+  const preInstallSignedView = document.getElementById('portal-pre-install-signed-view');
+
+  if (p.stageIndex >= 2) {
+    preInstallSec.style.display = "block";
+    if (p.preInstallPacketSigned) {
+      preInstallBadge.innerText = "Signed & Saved";
+      preInstallBadge.className = "badge badge-complete";
+      preInstallActions.style.display = "none";
+      preInstallSignedView.style.display = "flex";
+    } else {
+      preInstallBadge.innerText = "Awaiting Signature";
+      preInstallBadge.className = "badge badge-warning";
+      preInstallActions.style.display = "flex";
+      preInstallSignedView.style.display = "none";
+    }
   } else {
-    afterSec.style.display = "none";
+    preInstallSec.style.display = "none";
+  }
+
+  // Section 7: Final Completion & Aftercare Packet
+  const finalSec = document.getElementById('portal-sec-final-packet');
+  const finalBadge = document.getElementById('portal-final-packet-badge');
+  const signFinalBtn = document.getElementById('portal-sign-final-btn');
+  const viewFinalSignedBtn = document.getElementById('portal-view-final-signed-btn');
+
+  if (p.stageIndex >= 7) {
+    finalSec.style.display = "block";
+    if (p.finalPacketSigned) {
+      finalBadge.innerText = "Signed & Locked";
+      finalBadge.className = "badge badge-complete";
+      signFinalBtn.style.display = "none";
+      viewFinalSignedBtn.style.display = "inline-flex";
+    } else {
+      finalBadge.innerText = "Awaiting Walkthrough & Signature";
+      finalBadge.className = "badge badge-warning";
+      signFinalBtn.style.display = "inline-flex";
+      viewFinalSignedBtn.style.display = "none";
+    }
+  } else {
+    finalSec.style.display = "none";
   }
 
   renderDamageMarkers(p);
@@ -3637,6 +3702,8 @@ function generateDocument(type) {
         Thank you for your business! For any issues, refer to our wrap aftercare policy guidelines.
       </div>
     `;
+    content.innerHTML = docHtml;
+    document.getElementById('print-overlay').classList.add('active');
   } else if (type === 'aftercare') {
     docHtml = `
       <div class="print-header">
@@ -3683,46 +3750,21 @@ function generateDocument(type) {
         <div class="sig-line">Customer Acknowledgment</div>
       </div>
     `;
-  } else if (['packet', 'pre-install-packet', 'final-packet'].includes(type)) {
+    content.innerHTML = docHtml;
+    document.getElementById('print-overlay').classList.add('active');
+  } else if (type === 'packet') {
+    // INTERNAL SHOP WORK ORDER
     const packetConfig = {
-      packet: {
-        title: 'INTERNAL SHOP WORK ORDER & WRAP PACKET',
-        subtitle: 'Job Reference & Installer Checklist',
-        sectionTitle: 'Approvals Log Checklist',
-        checklist: `
-          [${p.paymentStatus !== 'unpaid' ? 'X' : ' '}] Deposit Paid (Amt: $${p.depositAmount.toFixed(2)})<br>
-          [${p.contractStatus === 'signed' ? 'X' : ' '}] Contract Terms Signed (By: ${p.contractSignedBy || 'None'})<br>
-          [${p.proofs[p.proofs.length - 1]?.status === 'Approved' ? 'X' : ' '}] Layout Design Proof Confirmed & Locked<br>
-          [${p.inspectionAcknowledged ? 'X' : ' '}] Damage Inspection Confirmed by Client
-        `
-      },
-      'pre-install-packet': {
-        title: 'PRE-INSTALL PRODUCTION PACKET',
-        subtitle: 'Vehicle Readiness, Damage Record & Installer Release',
-        sectionTitle: 'Pre-Install Release Checklist',
-        checklist: `
-          [${p.paymentStatus !== 'unpaid' ? 'X' : ' '}] Required Deposit Received<br>
-          [${p.contractStatus === 'signed' ? 'X' : ' '}] Contract Terms Signed<br>
-          [${p.proofs[p.proofs.length - 1]?.status === 'Approved' ? 'X' : ' '}] Final Proof Approved and Locked<br>
-          [${p.inspectionAcknowledged ? 'X' : ' '}] Existing Damage Reviewed with Customer<br>
-          [ ] Vehicle Washed, Dry and Free of Wax or Contaminants<br>
-          [ ] Keys, Bay and Installer Assignment Confirmed
-        `
-      },
-      'final-packet': {
-        title: 'FINAL COMPLETION & AFTERCARE PACKET',
-        subtitle: 'Install Completion, Customer Signoff & Care Record',
-        sectionTitle: 'Final Delivery Checklist',
-        checklist: `
-          [ ] Final Edge, Seam and Panel Inspection Complete<br>
-          [ ] Vehicle Photos Added to Completion Record<br>
-          [ ] Customer Walk-Through Completed<br>
-          [ ] Aftercare Instructions Reviewed and Delivered<br>
-          [ ] Remaining Balance Confirmed<br>
-          [ ] Customer Acceptance Signature Collected
-        `
-      }
-    }[type];
+      title: 'INTERNAL SHOP WORK ORDER & WRAP PACKET',
+      subtitle: 'Job Reference & Installer Checklist',
+      sectionTitle: 'Approvals Log Checklist',
+      checklist: `
+        [${p.paymentStatus !== 'unpaid' ? 'X' : ' '}] Deposit Paid (Amt: $${p.depositAmount.toFixed(2)})<br>
+        [${p.contractStatus === 'signed' ? 'X' : ' '}] Contract Terms Signed (By: ${p.contractSignedBy || 'None'})<br>
+        [${p.proofs[p.proofs.length - 1]?.status === 'Approved' ? 'X' : ' '}] Layout Design Proof Confirmed & Locked<br>
+        [${p.inspectionAcknowledged ? 'X' : ' '}] Damage Inspection Confirmed by Client
+      `
+    };
 
     let dmgRows = "";
     p.damageMarkers.forEach(dmg => {
@@ -3823,6 +3865,596 @@ function generateDocument(type) {
         <div class="sig-line">Installer Signoff (Date: ______ )</div>
       </div>
     `;
+    content.innerHTML = docHtml;
+    document.getElementById('print-overlay').classList.add('active');
+  } else if (type === 'pre-install-packet') {
+    // CUSTOMER-FACING PRE-INSTALL WRAP PACKET
+    const isSigned = p.preInstallPacketSigned;
+    
+    const shopBranding = `
+      <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; margin-bottom: 20px;">
+        <div>
+          <h2 style="font-weight: 800; color: #4f46e5; margin: 0; font-size: 1.6rem;">WRAP LAB AI</h2>
+          <p style="font-size: 0.8rem; color: #6b7280; margin: 4px 0 0 0;">Premium Vehicle Graphics & Custom Wraps</p>
+          <p style="font-size: 0.75rem; color: #9ca3af; margin: 2px 0 0 0;">1500 Silicon Way, Tech City | (555) 972-7244 | support@wraplab.ai</p>
+        </div>
+        <div style="text-align: right;">
+          <h3 style="font-weight: 700; color: #111827; margin: 0; font-size: 1.1rem;">PRE-INSTALL WRAP PACKET</h3>
+          <p style="font-size: 0.8rem; color: #4b5563; margin: 4px 0 0 0;">Order #: <strong>${p.id}</strong></p>
+          <p style="font-size: 0.75rem; color: #6b7280; margin: 2px 0 0 0;">Date: ${new Date().toISOString().split('T')[0]}</p>
+        </div>
+      </div>
+    `;
+
+    const customerInfo = `
+      <div class="print-grid" style="margin-bottom: 20px;">
+        <div class="print-block">
+          <div class="print-block-title">Customer Information</div>
+          <strong>${p.firstName} ${p.lastName}</strong><br>
+          ${p.businessName || "Private Vehicle Owner"}<br>
+          Phone: ${p.phone}<br>
+          Email: ${p.email}<br>
+          Address: ${p.address || "123 Client Lane, Tech City"}
+        </div>
+        <div class="print-block">
+          <div class="print-block-title">Vehicle Specifications</div>
+          <strong>Vehicle:</strong> ${p.year} ${p.make} ${p.model}<br>
+          <strong>Trim / Cab:</strong> ${p.trim || 'Standard'}<br>
+          <strong>Original Color:</strong> ${p.originalColor || 'N/A'}<br>
+          <strong>Plate / VIN:</strong> ${p.licensePlate || 'N/A'} | ${p.vin || 'N/A'}
+        </div>
+      </div>
+    `;
+
+    const includedAreas = p.areas.filter(a => a.included).map(a => a.name).join(', ') || "No wrap areas selected";
+    const scopeHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Wrap Scope of Work</div>
+        <div style="margin-bottom: 8px;"><strong>Wrap Type:</strong> ${p.wrapType}</div>
+        <div style="margin-bottom: 8px;"><strong>Included Coverage Areas:</strong> ${includedAreas}</div>
+        <div><strong>Project Objectives:</strong> ${p.goals || 'N/A'}</div>
+      </div>
+    `;
+
+    const quoteDate = p.contractSentDate || "2026-06-21";
+    const expDate = new Date(new Date(quoteDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const totalQuote = p.quoteAmount;
+    const depAmt = p.depositAmount || (totalQuote * (p.depositPercent / 100));
+    const balanceRemaining = totalQuote - (p.paymentStatus === 'unpaid' ? 0 : depAmt);
+    
+    const quoteHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Financial Summary</div>
+        <div class="print-grid" style="grid-template-columns: repeat(3, 1fr); border: none; padding: 0; margin: 0;">
+          <div>
+            <span style="font-size: 0.75rem; color: #6b7280; display: block; text-transform: uppercase;">Total Quote Amount</span>
+            <strong style="font-size: 1.15rem; color: #111827;">$${totalQuote.toFixed(2)}</strong>
+          </div>
+          <div>
+            <span style="font-size: 0.75rem; color: #6b7280; display: block; text-transform: uppercase;">Deposit Paid</span>
+            <strong style="font-size: 1.15rem; color: ${p.paymentStatus !== 'unpaid' ? '#10b981' : '#f59e0b'};">$${depAmt.toFixed(2)} (${p.paymentStatus !== 'unpaid' ? 'PAID' : 'DUE'})</strong>
+          </div>
+          <div>
+            <span style="font-size: 0.75rem; color: #6b7280; display: block; text-transform: uppercase;">Remaining Balance</span>
+            <strong style="font-size: 1.15rem; color: #111827;">$${balanceRemaining.toFixed(2)}</strong>
+          </div>
+        </div>
+        <div style="font-size: 0.75rem; color: #6b7280; margin-top: 10px; border-top: 1px dashed #e5e7eb; padding-top: 8px;">
+          * Quote valid until: <strong>${expDate}</strong> (30 days from project creation). Remaining balance due in full at pickup.
+        </div>
+      </div>
+    `;
+
+    const activeProof = p.proofs?.[p.proofs.length - 1];
+    const proofVersion = activeProof ? activeProof.version.toUpperCase() : "V1";
+    const proofApprovalDate = activeProof && activeProof.status === "Approved" ? (activeProof.date || "2026-06-21") : "Pending Approval";
+    const mockupUrl = getMockupImageUrl(p.mockupImage, p.bodyType);
+    
+    const designTimelineHtml = `
+      <div class="print-grid" style="margin-bottom: 20px;">
+        <div class="print-block">
+          <div class="print-block-title">Approved Design Proof</div>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <div style="width: 100px; height: 60px; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden; background: #f3f4f6; display: flex; align-items: center; justify-content: center;">
+              <img src="${mockupUrl}" style="width: 100%; height: 100%; object-fit: cover;">
+            </div>
+            <div>
+              <strong>Design Version:</strong> ${proofVersion}<br>
+              <strong>Approved Date:</strong> ${proofApprovalDate}
+            </div>
+          </div>
+        </div>
+        <div class="print-block">
+          <div class="print-block-title">Project Schedule & Timeline</div>
+          <strong>Artwork Approval:</strong> ${proofApprovalDate}<br>
+          <strong>Vehicle Drop-off:</strong> ${p.dropOffTime ? p.dropOffTime.replace('T', ' ') : 'TBD'}<br>
+          <strong>Installation Date:</strong> ${p.installDate || 'TBD'}<br>
+          <strong>Estimated Pickup:</strong> ${p.pickupTime ? p.pickupTime.replace('T', ' ') : 'TBD'}
+        </div>
+      </div>
+    `;
+
+    const prepChecklistHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Customer Preparation Checklist</div>
+        <div class="packet-prep-checklist" style="background: none; border: none; padding: 0; margin: 0;">
+          <div class="packet-check-item">
+            <input type="checkbox" checked onclick="return false;">
+            <span><strong>Vehicle Cleanliness:</strong> Vehicle should be reasonably clean (basic hand wash only, no wax, clay bar, or ceramic coatings) to ensure vinyl adhesion.</span>
+          </div>
+          <div class="packet-check-item">
+            <input type="checkbox" checked onclick="return false;">
+            <span><strong>Remove Belongings:</strong> Remove all personal belongings, GPS units, dash cams, and contents of the truck bed or cargo bays prior to drop-off.</span>
+          </div>
+          <div class="packet-check-item">
+            <input type="checkbox" checked onclick="return false;">
+            <span><strong>Body Damage:</strong> Repair major dents, deep scratches, rust spots, or peeling clear-coat failure before install when possible.</span>
+          </div>
+          <div class="packet-check-item">
+            <input type="checkbox" checked onclick="return false;">
+            <span><strong>Disclosure:</strong> Notify the shop of any previous paintwork, body repairs, rust, decals, clear-coat failure, or modifications.</span>
+          </div>
+          <div class="packet-check-item">
+            <input type="checkbox" checked onclick="return false;">
+            <span><strong>Logistics:</strong> Confirm vehicle drop-off and pickup times, and arrange your own transportation to/from the shop.</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const ackTermsHtml = `
+      <div class="packet-acknowledgments">
+        <h4>Customer Terms & Acknowledgment</h4>
+        <ol>
+          <li>Wrap installation quality directly reflects the underlying condition of the vehicle paint and body panels.</li>
+          <li>Dents, scratches, rust, paint chips, clear-coat failure, adhesive residue, repaired panels, loose trim, and existing body damage may show through the wrap material or affect adhesive bonding.</li>
+          <li>Pre-existing dents and deep scratches may appear as bubbles, wrinkles, or textured creases under the vinyl wrap.</li>
+          <li>Seams, patches, relief cuts, overlaps, and visible edge lines may be necessary for safe wrap installation on deep contours and recesses.</li>
+          <li>Minor color variations can occur between panels, material print runs, rolls, or vehicle stretch contours.</li>
+          <li>Vehicle wraps are commercial graphics intended to be viewed from a normal viewing distance of approximately 6–10 feet.</li>
+          <li>Certain areas will not be wrapped or may show original vehicle paint color, including door jambs, inner doors, bumpers backsides, pinch welds, vents, rubber moldings, silicone/caulking lines, porous plastics, and chrome trim unless specifically included.</li>
+          <li>The shop is not responsible for pre-existing damage, paint damage, or paint lifting related to poor paint condition, aftermarket resprays, weak clear coat, rust, or future material removal.</li>
+          <li>Quotes are valid for the configured 30-day period.</li>
+          <li>Deposits are required to lock in scheduling and commence production/artwork printing.</li>
+          <li>The customer receives the included design revision rounds; additional revisions or major layouts will be billed separately.</li>
+          <li>Additional requested work, surface preparation (removal of old decals/tar/saps), or material updates outside the approved scope require change approval and will incur added costs.</li>
+        </ol>
+      </div>
+    `;
+
+    let signatureHtml = "";
+    if (isSigned) {
+      const sigVisual = p.preInstallPacketSigType === 'draw'
+        ? `<img src="${p.preInstallPacketSigData}" style="max-height: 80px; display: block; margin: 0 auto;">`
+        : p.preInstallPacketSigType === 'type'
+          ? `<span class="packet-verified-text">${p.preInstallPacketSigData}</span>`
+          : `<span style="font-weight: 700; color: #10b981;"><i class="fa-solid fa-square-check"></i> Checkbox Confirmed</span>`;
+      
+      signatureHtml = `
+        <div class="packet-sig-zone signed">
+          <div class="packet-audit-seal"><i class="fa-solid fa-shield-halved"></i> Digitally Signed & Locked</div>
+          <div class="print-grid" style="border: none; padding: 0; margin: 0 0 10px 0;">
+            <div style="text-align: center; border-right: 1px solid #d1d5db; padding: 10px;">
+              <div style="height: 80px; display: flex; align-items: center; justify-content: center;">
+                ${sigVisual}
+              </div>
+              <div style="border-top: 1px solid #4b5563; font-size: 0.75rem; color: #4b5563; padding-top: 4px; width: 80%; margin: 4px auto 0 auto;">Customer Signature (Digital)</div>
+            </div>
+            <div style="padding: 10px 20px;">
+              <strong>Printed Name:</strong> ${p.preInstallPacketSignedBy}<br>
+              <strong>Date Signed:</strong> ${p.preInstallPacketSignedDate}<br>
+              <strong>Status:</strong> Approved & Released to Production
+            </div>
+          </div>
+          <div class="packet-audit-info">
+            <strong>Secure Portal Audit Trail:</strong><br>
+            ${p.preInstallPacketAudit}
+          </div>
+        </div>
+      `;
+    } else {
+      signatureHtml = `
+        <div class="packet-sig-zone no-print">
+          <div style="font-weight: 700; margin-bottom: 12px; color: #4f46e5;"><i class="fa-solid fa-file-signature"></i> Secure Portal Digital Sign-off</div>
+          <div style="margin-bottom: 16px;">
+            <label class="packet-check-item" style="font-weight: 600;">
+              <input type="checkbox" id="packet-sig-ack-checkbox">
+              <span>I acknowledge that I have reviewed the vehicle details, timeline, prep checklist, and paint/body liability terms above and authorize Wrap Lab AI to proceed with this work.</span>
+            </label>
+          </div>
+          
+          <div class="form-grid" style="margin-bottom: 16px;">
+            <div class="form-group">
+              <label>Customer Printed Name (Required)</label>
+              <input type="text" id="packet-sig-name" class="form-input" placeholder="Enter printed name" value="${p.firstName} ${p.lastName}">
+            </div>
+          </div>
+
+          <div class="packet-sig-tabs">
+            <button class="packet-sig-tab active" data-tab="draw" onclick="switchPacketSigTab('draw')"><i class="fa-solid fa-pen"></i> Draw Signature</button>
+            <button class="packet-sig-tab" data-tab="type" onclick="switchPacketSigTab('type')"><i class="fa-solid fa-keyboard"></i> Type Signature</button>
+            <button class="packet-sig-tab" data-tab="checkbox" onclick="switchPacketSigTab('checkbox')"><i class="fa-solid fa-square-check"></i> One-Click Approve</button>
+          </div>
+
+          <div class="packet-sig-body">
+            <div id="packet-sig-draw-body">
+              <canvas id="packet-sig-canvas" class="packet-sig-canvas"></canvas>
+              <button class="packet-sig-clear" onclick="clearPacketCanvas()">Clear pad</button>
+            </div>
+            <div id="packet-sig-type-body" style="display: none; height: 100%;">
+              <input type="text" id="packet-sig-typed-input" class="packet-sig-typed" placeholder="Type name here for cursive preview">
+            </div>
+            <div id="packet-sig-check-body" style="display: none; height: 100%;">
+              <div class="packet-sig-checkbox" onclick="document.getElementById('packet-sig-chk').click()">
+                <input type="checkbox" id="packet-sig-chk" onclick="event.stopPropagation()">
+                <span>Verify identity and check to stamp digital signature seal</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="packet-action-bar">
+            <button class="btn btn-danger" onclick="closePrintView()">Cancel</button>
+            <button class="btn btn-success" onclick="submitPacketSignature('pre-install-packet')"><i class="fa-solid fa-lock"></i> Digitally Sign & Lock Packet</button>
+          </div>
+        </div>
+
+        <div style="display: none;" class="print-signatures">
+          <div class="sig-line">
+            <br><br>
+            Customer Signature
+          </div>
+          <div class="sig-line">
+            <br><br>
+            Date Signed
+          </div>
+        </div>
+      `;
+    }
+
+    docHtml = `
+      ${shopBranding}
+      ${customerInfo}
+      ${scopeHtml}
+      ${quoteHtml}
+      ${designTimelineHtml}
+      ${prepChecklistHtml}
+      ${ackTermsHtml}
+      
+      <div style="display: flex; justify-content: space-between; margin-top: 30px; margin-bottom: 20px;">
+        <div class="sig-line">
+          <div style="font-family: 'Brush Script MT', cursive; font-size: 1.5rem; color: #4b5563;">Alex Manager</div>
+          Shop Representative Signature
+        </div>
+        <div class="sig-line">
+          <div style="font-size: 0.95rem; color: #4b5563; padding-top: 6px;">${new Date().toISOString().split('T')[0]}</div>
+          Date Signed
+        </div>
+      </div>
+
+      ${signatureHtml}
+    `;
+
+    content.innerHTML = docHtml;
+    document.getElementById('print-overlay').classList.add('active');
+    
+    // Auto initialize signature pad in DOM after render
+    setTimeout(() => {
+      const canvas = document.getElementById('packet-sig-canvas');
+      if (canvas) {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        initPacketSignaturePad('packet-sig-canvas');
+      }
+    }, 100);
+    return;
+  } else if (type === 'final-packet') {
+    // CUSTOMER-FACING FINAL WRAP COMPLETION & AFTERCARE PACKET
+    const isSigned = p.finalPacketSigned;
+    const includedAreas = p.areas.filter(a => a.included).map(a => a.name).join(', ') || "No wrap areas selected";
+    const mockupUrl = getMockupImageUrl(p.mockupImage, p.bodyType);
+    const completionDate = p.pickupTime ? p.pickupTime.split('T')[0] : new Date().toISOString().split('T')[0];
+
+    // Page 1: Cover Page
+    const coverPageHtml = `
+      <div class="packet-cover-page">
+        <div class="packet-cover-logo"><i class="fa-solid fa-car-rear"></i></div>
+        <h1 class="packet-cover-title">FINAL WRAP COMPLETION & AFTERCARE PACKET</h1>
+        <p class="packet-cover-subtitle">Project Reference & Customer Hand-off Documentation</p>
+        
+        <div class="packet-cover-meta">
+          <div class="packet-cover-meta-row"><strong>Order Reference:</strong> <span>${p.id}</span></div>
+          <div class="packet-cover-meta-row"><strong>Client / Business:</strong> <span>${p.firstName} ${p.lastName} ${p.businessName ? `(${p.businessName})` : ''}</span></div>
+          <div class="packet-cover-meta-row"><strong>Vehicle:</strong> <span>${p.year} ${p.make} ${p.model} (${p.originalColor})</span></div>
+          <div class="packet-cover-meta-row"><strong>Wrap Coverage:</strong> <span>${p.wrapType} - ${includedAreas}</span></div>
+          <div class="packet-cover-meta-row"><strong>Completion Date:</strong> <span>${completionDate}</span></div>
+        </div>
+
+        <div class="packet-cover-photo-frame">
+          <img class="packet-cover-photo" src="${mockupUrl}" alt="Finished Wrap Mockup">
+        </div>
+      </div>
+    `;
+
+    // Page 2 Content
+    const shopBranding = `
+      <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; margin-bottom: 20px; margin-top: 20px;">
+        <div>
+          <h2 style="font-weight: 800; color: #4f46e5; margin: 0; font-size: 1.6rem;">WRAP LAB AI</h2>
+          <p style="font-size: 0.8rem; color: #6b7280; margin: 4px 0 0 0;">Premium Vehicle Graphics & Custom Wraps</p>
+        </div>
+        <div style="text-align: right;">
+          <h3 style="font-weight: 700; color: #111827; margin: 0; font-size: 1.1rem;">COMPLETION RECORD</h3>
+          <p style="font-size: 0.8rem; color: #4b5563; margin: 4px 0 0 0;">Order #: <strong>${p.id}</strong></p>
+        </div>
+      </div>
+    `;
+
+    const thankYouHtml = `
+      <div class="print-block" style="margin-bottom: 20px; background: #f0f9ff; border-color: #bae6fd;">
+        <h4 style="margin: 0 0 8px 0; color: #0369a1; font-size: 1rem;"><i class="fa-solid fa-heart"></i> Thank You for Your Business!</h4>
+        <p style="margin: 0; font-size: 0.88rem; line-height: 1.5; color: #0c4a6e;">
+          Dear ${p.firstName},<br>
+          We are excited to deliver your custom wrapped ${p.year} ${p.make} ${p.model}. Our team has finished the wrap installation and checked all edges and seams. To protect your investment and maintain the vinyl films, please review this final packet and follow the aftercare guidelines.
+        </p>
+      </div>
+    `;
+
+    const scopeHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Summary of Completed Work</div>
+        <strong>Vehicle Wrap Coverages:</strong> ${includedAreas}<br>
+        <strong>Approved proof reference:</strong> Version ${p.proofs?.[p.proofs.length - 1]?.version.toUpperCase() || 'V1'}
+      </div>
+    `;
+
+    let dmgRows = "";
+    p.damageMarkers.forEach(dmg => {
+      dmgRows += `<tr><td><strong>${dmg.type}</strong></td><td>${dmg.severity}</td><td>${dmg.notes}</td></tr>`;
+    });
+    if (p.damageMarkers.length === 0) {
+      dmgRows = `<tr><td colspan="3" style="text-align: center; color: #6b7280;">No pre-existing paint or body damage was noted at intake.</td></tr>`;
+    }
+
+    const preExistingDamageHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Acknowledged Pre-Existing Vehicle Conditions</div>
+        <table class="print-table" style="font-size: 0.78rem;">
+          <thead>
+            <tr>
+              <th>Damage Type</th>
+              <th>Severity</th>
+              <th>Description / Acknowledgment Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dmgRows}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    let warrantyHtml = "";
+    if (p.materials && p.materials.length > 0) {
+      p.materials.forEach(mat => {
+        const brand = mat.brand || "Premium";
+        const wDuration = mat.name.includes("3M") ? "3 Years Vertical / 1 Year Horizontal" : "3 Years Vertical";
+        warrantyHtml += `<li><strong>${mat.name}:</strong> Manufacturer ${brand} Film Warranty (${wDuration})</li>`;
+      });
+    } else {
+      warrantyHtml = `<li>Standard Shop Workmanship Guarantee: 12 months. Manufacturer film warranties vary by panel location.</li>`;
+    }
+
+    const warrantyBlockHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Material Warranty Guidelines</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.85rem; line-height: 1.6; color: #4b5563;">
+          ${warrantyHtml}
+          <li>Workmanship Guarantee covers edge lifting or peeling due to installation defects within the first 12 months. Damage due to washing, accidents, or neglect is excluded.</li>
+        </ul>
+      </div>
+    `;
+
+    const bondingHtml = `
+      <div class="print-block" style="margin-bottom: 20px; background: #fffbeb; border-color: #fde68a;">
+        <h4 style="margin: 0 0 8px 0; color: #b45309; font-weight: 700; font-size: 0.95rem;"><i class="fa-solid fa-hourglass-half"></i> Prominent First 5 Days: Critical Film Bonding Period</h4>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.85rem; line-height: 1.6; color: #78350f;">
+          <li><strong>Allow the wrap to bond and settle for 5 full days after installation.</strong></li>
+          <li><strong>Do NOT wash the vehicle</strong> under any circumstances during this 5-day period.</li>
+          <li>Small micro-bubbles, water vapor pockets, or minor film imperfections will naturally reduce, dry out, or settle as the vinyl adhesive sets.</li>
+          <li>Do NOT pick at, press, or manipulate any edges, seams, bubbles, or lifted areas.</li>
+          <li>Contact the shop immediately after the bonding period if any major concerns or lifting points are noticed.</li>
+        </ul>
+      </div>
+    `;
+
+    const aftercareHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Long-Term Wrap Care & Maintenance</div>
+        <ul style="margin: 0; padding-left: 20px; font-size: 0.8rem; line-height: 1.6; color: #4b5563;">
+          <li><strong>Hand washing is highly recommended.</strong> Wash weekly using a soft microfiber mitt and mild automotive soap.</li>
+          <li><strong>Avoid automatic brush washes:</strong> Spinning brushes scratch matte/gloss wrap finishes and catch on corners, lifting panels.</li>
+          <li><strong>Pressure Washing Caution:</strong> If using a pressure washer, keep the spray nozzle at least 18 inches away from wrap surfaces. <strong>Never</strong> spray at a sharp angle or directly on seams, edges, corners, window perforations, or graphics. Keep the nozzle perpendicular (90 degrees).</li>
+          <li>Clean fuel spills, bird droppings, bugs, tree sap, salt, and chemicals promptly. Soften stubborn spots by soaking with warm soapy water.</li>
+          <li>Avoid harsh solvents, degreasers, abrasive compounds, rubbing polishes, and petroleum-based cleaners.</li>
+          <li>Do NOT use the rear windshield wiper or roll down windows if graphic wrap material is applied over them.</li>
+          <li>Avoid using metal ice scrapers near graphics or printed film windows.</li>
+          <li>Extreme temperatures, snow, acid rain, air pollution, and prolonged UV sun exposure can shorten wrap life. Park inside a garage or under shade when possible.</li>
+          <li>Normal wear and tear such as small road nicks, micro-scratches, or damage after delivery is the customer's responsibility.</li>
+        </ul>
+      </div>
+    `;
+
+    const contactUsHtml = `
+      <div class="print-block" style="margin-bottom: 20px;">
+        <div class="print-block-title">Contact Us Promptly If You Notice</div>
+        <div style="font-size: 0.85rem; color: #4b5563; line-height: 1.5;">
+          If you notice any of the following, please contact us immediately to assess and perform minor trims or adjustments:<br>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; font-weight: 600; color: #1f2937;">
+            <span>• Lifting edges or peeling corners</span>
+            <span>• Large bubbles remaining after 5 days</span>
+            <span>• Material separation or stress wrinkles</span>
+            <span>• Questions on repairs, removal, or sealant</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    let signatureHtml = "";
+    if (isSigned) {
+      const sigVisual = p.finalPacketSigType === 'draw'
+        ? `<img src="${p.finalPacketSigData}" style="max-height: 80px; display: block; margin: 0 auto;">`
+        : p.finalPacketSigType === 'type'
+          ? `<span class="packet-verified-text">${p.finalPacketSigData}</span>`
+          : `<span style="font-weight: 700; color: #10b981;"><i class="fa-solid fa-square-check"></i> Checkbox Confirmed</span>`;
+
+      signatureHtml = `
+        <div class="packet-sig-zone signed">
+          <div class="packet-audit-seal"><i class="fa-solid fa-shield-halved"></i> Completion Sign-off Locked</div>
+          <div class="print-grid" style="border: none; padding: 0; margin: 0 0 10px 0;">
+            <div style="text-align: center; border-right: 1px solid #d1d5db; padding: 10px;">
+              <div style="height: 80px; display: flex; align-items: center; justify-content: center;">
+                ${sigVisual}
+              </div>
+              <div style="border-top: 1px solid #4b5563; font-size: 0.75rem; color: #4b5563; padding-top: 4px; width: 80%; margin: 4px auto 0 auto;">Customer Acceptance Signature</div>
+            </div>
+            <div style="padding: 10px 20px;">
+              <strong>Signed By:</strong> ${p.finalPacketSignedBy}<br>
+              <strong>Date Signed:</strong> ${p.finalPacketSignedDate}<br>
+              <strong>Status:</strong> Job Completed & Delivered
+            </div>
+          </div>
+          <div class="packet-audit-info">
+            <strong>Audit Trail Log:</strong><br>
+            ${p.finalPacketAudit}
+          </div>
+        </div>
+      `;
+    } else {
+      signatureHtml = `
+        <div class="packet-sig-zone no-print">
+          <div style="font-weight: 700; margin-bottom: 12px; color: #10b981;"><i class="fa-solid fa-check-double"></i> Final Hand-off Walk-through & Sign-off</div>
+          
+          <div class="packet-checklist" style="margin-bottom: 16px;">
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(0) ? 'checked' : ''}>
+              <span>Customer walkthrough completed with shop representative.</span>
+            </label>
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(1) ? 'checked' : ''}>
+              <span>Customer is satisfied with wrap coverage, alignment, and completed work.</span>
+            </label>
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(2) ? 'checked' : ''}>
+              <span>Customer received aftercare instructions and documentation.</span>
+            </label>
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(3) ? 'checked' : ''}>
+              <span>Customer understands 5-day wash restrictions and long-term care guidelines.</span>
+            </label>
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(4) ? 'checked' : ''}>
+              <span>Customer understands paint condition limitations and future wrap removal risks.</span>
+            </label>
+            <label class="packet-check-item">
+              <input type="checkbox" class="walkthrough-check" ${p.finalWalkthroughChecked.includes(5) ? 'checked' : ''}>
+              <span>Customer acknowledges receipt of this final completion and aftercare packet.</span>
+            </label>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label class="packet-check-item" style="font-weight: 600;">
+              <input type="checkbox" id="packet-sig-ack-checkbox">
+              <span>I confirm that all walkthrough items are complete and approve the delivery of my wrapped vehicle.</span>
+            </label>
+          </div>
+          
+          <div class="form-grid" style="margin-bottom: 16px;">
+            <div class="form-group">
+              <label>Customer Printed Name (Required)</label>
+              <input type="text" id="packet-sig-name" class="form-input" placeholder="Enter printed name" value="${p.firstName} ${p.lastName}">
+            </div>
+          </div>
+
+          <div class="packet-sig-tabs">
+            <button class="packet-sig-tab active" data-tab="draw" onclick="switchPacketSigTab('draw')"><i class="fa-solid fa-pen"></i> Draw Signature</button>
+            <button class="packet-sig-tab" data-tab="type" onclick="switchPacketSigTab('type')"><i class="fa-solid fa-keyboard"></i> Type Signature</button>
+            <button class="packet-sig-tab" data-tab="checkbox" onclick="switchPacketSigTab('checkbox')"><i class="fa-solid fa-square-check"></i> One-Click Approve</button>
+          </div>
+
+          <div class="packet-sig-body">
+            <div id="packet-sig-draw-body">
+              <canvas id="packet-sig-canvas" class="packet-sig-canvas"></canvas>
+              <button class="packet-sig-clear" onclick="clearPacketCanvas()">Clear pad</button>
+            </div>
+            <div id="packet-sig-type-body" style="display: none; height: 100%;">
+              <input type="text" id="packet-sig-typed-input" class="packet-sig-typed" placeholder="Type name here for cursive preview">
+            </div>
+            <div id="packet-sig-check-body" style="display: none; height: 100%;">
+              <div class="packet-sig-checkbox" onclick="document.getElementById('packet-sig-chk').click()">
+                <input type="checkbox" id="packet-sig-chk" onclick="event.stopPropagation()">
+                <span>Verify identity and check to stamp digital signature seal</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="packet-action-bar">
+            <button class="btn btn-danger" onclick="closePrintView()">Cancel</button>
+            <button class="btn btn-success" onclick="submitPacketSignature('final-packet')"><i class="fa-solid fa-check"></i> Accept, Sign & Complete Job</button>
+          </div>
+        </div>
+
+        <div style="display: none;" class="print-signatures">
+          <div class="sig-line">
+            <br><br>
+            Customer Walk-through Signature
+          </div>
+          <div class="sig-line">
+            <br><br>
+            Date Signed
+          </div>
+        </div>
+      `;
+    }
+
+    docHtml = `
+      ${coverPageHtml}
+      ${shopBranding}
+      ${thankYouHtml}
+      ${scopeHtml}
+      ${preExistingDamageHtml}
+      ${warrantyBlockHtml}
+      ${bondingHtml}
+      ${aftercareHtml}
+      ${contactUsHtml}
+      
+      <div style="display: flex; justify-content: space-between; margin-top: 30px; margin-bottom: 20px;">
+        <div class="sig-line">
+          <div style="font-family: 'Brush Script MT', cursive; font-size: 1.5rem; color: #4b5563;">Dave Lead</div>
+          Lead Installer Signoff
+        </div>
+        <div class="sig-line">
+          <div style="font-size: 0.95rem; color: #4b5563; padding-top: 6px;">${new Date().toISOString().split('T')[0]}</div>
+          Date Signed
+        </div>
+      </div>
+
+      ${signatureHtml}
+    `;
+
+    content.innerHTML = docHtml;
+    document.getElementById('print-overlay').classList.add('active');
+    
+    // Auto initialize signature pad in DOM after render
+    setTimeout(() => {
+      const canvas = document.getElementById('packet-sig-canvas');
+      if (canvas) {
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        initPacketSignaturePad('packet-sig-canvas');
+      }
+    }, 100);
+    return;
+  }
   }
 
   content.innerHTML = docHtml;
@@ -3831,6 +4463,216 @@ function generateDocument(type) {
 
 function closePrintView() {
   document.getElementById('print-overlay').classList.remove('active');
+}
+
+// --- DIGITAL SIGNATURE & AUDIT HANDLERS FOR PACKETS ---
+let packetSigCanvas = null;
+let packetSigCtx = null;
+let packetSigIsDrawing = false;
+let packetSigSigned = false;
+
+function initPacketSignaturePad(canvasId) {
+  packetSigCanvas = document.getElementById(canvasId);
+  if (!packetSigCanvas) return;
+  packetSigCtx = packetSigCanvas.getContext('2d');
+  
+  packetSigCtx.strokeStyle = "#1e3a8a";
+  packetSigCtx.lineWidth = 3;
+  packetSigCtx.lineCap = "round";
+  packetSigCanvas.dataset.signed = "false";
+  packetSigSigned = false;
+
+  const getPos = (e) => {
+    const rect = packetSigCanvas.getBoundingClientRect();
+    const clientX = e.clientX || (e.touches && e.touches[0]?.clientX);
+    const clientY = e.clientY || (e.touches && e.touches[0]?.clientY);
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  };
+
+  const startDraw = (e) => {
+    packetSigIsDrawing = true;
+    packetSigSigned = true;
+    packetSigCanvas.dataset.signed = "true";
+    const pos = getPos(e);
+    packetSigCtx.beginPath();
+    packetSigCtx.moveTo(pos.x, pos.y);
+    if (e.type === 'touchstart') e.preventDefault();
+  };
+
+  const draw = (e) => {
+    if (!packetSigIsDrawing) return;
+    const pos = getPos(e);
+    packetSigCtx.lineTo(pos.x, pos.y);
+    packetSigCtx.stroke();
+    if (e.type === 'touchmove') e.preventDefault();
+  };
+
+  const stopDraw = () => {
+    packetSigIsDrawing = false;
+  };
+
+  packetSigCanvas.addEventListener('mousedown', startDraw);
+  packetSigCanvas.addEventListener('mousemove', draw);
+  window.addEventListener('mouseup', stopDraw);
+
+  packetSigCanvas.addEventListener('touchstart', startDraw, { passive: false });
+  packetSigCanvas.addEventListener('touchmove', draw, { passive: false });
+  window.addEventListener('touchend', stopDraw);
+}
+
+function clearPacketCanvas() {
+  if (packetSigCanvas && packetSigCtx) {
+    packetSigCtx.clearRect(0, 0, packetSigCanvas.width, packetSigCanvas.height);
+    packetSigCanvas.dataset.signed = "false";
+    packetSigSigned = false;
+  }
+}
+
+function switchPacketSigTab(tabType) {
+  const tabs = document.querySelectorAll('.packet-sig-tab');
+  tabs.forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tabType);
+  });
+  
+  const drawBody = document.getElementById('packet-sig-draw-body');
+  const typeBody = document.getElementById('packet-sig-type-body');
+  const checkBody = document.getElementById('packet-sig-check-body');
+  
+  if (drawBody) drawBody.style.display = tabType === 'draw' ? 'block' : 'none';
+  if (typeBody) typeBody.style.display = tabType === 'type' ? 'block' : 'none';
+  if (checkBody) checkBody.style.display = tabType === 'checkbox' ? 'block' : 'none';
+  
+  if (tabType === 'draw') {
+    const canvas = document.getElementById('packet-sig-canvas');
+    if (canvas && canvas.width !== canvas.offsetWidth) {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      initPacketSignaturePad('packet-sig-canvas');
+    }
+  }
+}
+
+function submitPacketSignature(type) {
+  const p = getActiveProject();
+  if (!p) return;
+
+  const printedNameInput = document.getElementById('packet-sig-name');
+  if (!printedNameInput || !printedNameInput.value.trim()) {
+    alert("Please enter your printed name to sign the document.");
+    return;
+  }
+  const printedName = printedNameInput.value.trim();
+
+  const ackCheckbox = document.getElementById('packet-sig-ack-checkbox');
+  if (!ackCheckbox || !ackCheckbox.checked) {
+    alert("You must check the acknowledgment box before signing.");
+    return;
+  }
+
+  if (type === 'final-packet') {
+    const walkthroughCheckboxes = document.querySelectorAll('.walkthrough-check');
+    let allChecked = true;
+    walkthroughCheckboxes.forEach(cb => {
+      if (!cb.checked) allChecked = false;
+    });
+    if (!allChecked) {
+      alert("Please complete and check all walkthrough items before signing.");
+      return;
+    }
+    p.finalWalkthroughChecked = Array.from(walkthroughCheckboxes).map((cb, idx) => cb.checked ? idx : -1).filter(idx => idx !== -1);
+  }
+
+  const activeTab = document.querySelector('.packet-sig-tab.active');
+  const sigType = activeTab ? activeTab.dataset.tab : 'checkbox';
+
+  let sigData = "";
+  if (sigType === 'draw') {
+    const canvas = document.getElementById('packet-sig-canvas');
+    if (!canvas || canvas.dataset.signed !== "true") {
+      alert("Please draw your signature in the pad.");
+      return;
+    }
+    sigData = canvas.toDataURL();
+  } else if (sigType === 'type') {
+    const typedInput = document.getElementById('packet-sig-typed-input');
+    if (!typedInput || !typedInput.value.trim()) {
+      alert("Please type your signature.");
+      return;
+    }
+    sigData = typedInput.value.trim();
+  } else {
+    const chk = document.getElementById('packet-sig-chk');
+    if (!chk || !chk.checked) {
+      alert("Please check the digital signature verification box.");
+      return;
+    }
+    sigData = "Digitally Verified & Checkbox Approved";
+  }
+
+  const dateStr = new Date().toISOString().split('T')[0];
+  const timeStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+  
+  const auditIP = '192.168.1.' + Math.floor(Math.random() * 254 + 1);
+  const auditDevice = "Windows 11 / Chrome (Secure Digital)";
+  const auditHash = Math.random().toString(36).substring(2, 10).toUpperCase() + "-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+  const auditTrail = `IP: ${auditIP} | Timestamp: ${timeStr} UTC | Device: ${auditDevice} | Verification-Hash: ${auditHash}`;
+
+  if (type === 'pre-install-packet') {
+    p.preInstallPacketSigned = true;
+    p.preInstallPacketSignedBy = printedName;
+    p.preInstallPacketSignedDate = dateStr;
+    p.preInstallPacketSigType = sigType;
+    p.preInstallPacketSigData = sigData;
+    p.preInstallPacketAudit = auditTrail;
+
+    p.files.push({
+      name: `signed-pre-install-packet.pdf`,
+      category: "Signed documents",
+      date: dateStr,
+      customerVisible: true,
+      marketingPermission: false
+    });
+
+    p.chatHistory.push({
+      sender: "customer",
+      text: `Digitally signed and approved the Pre-Install Wrap Packet (Signed By: ${printedName}, Method: ${sigType.toUpperCase()}).`,
+      time: new Date().toISOString().replace('T', ' ').substring(0, 16)
+    });
+  } else if (type === 'final-packet') {
+    p.finalPacketSigned = true;
+    p.finalPacketSignedBy = printedName;
+    p.finalPacketSignedDate = dateStr;
+    p.finalPacketSigType = sigType;
+    p.finalPacketSigData = sigData;
+    p.finalPacketAudit = auditTrail;
+
+    p.files.push({
+      name: `final-wrap-packet-signed.pdf`,
+      category: "Final Packets",
+      date: dateStr,
+      customerVisible: true,
+      marketingPermission: false
+    });
+
+    p.chatHistory.push({
+      sender: "customer",
+      text: `Digitally signed the Final Wrap Completion & Aftercare Packet (Signed By: ${printedName}, Method: ${sigType.toUpperCase()}). Walkthrough checklist completed.`,
+      time: new Date().toISOString().replace('T', ' ').substring(0, 16)
+    });
+  }
+
+  closePrintView();
+  loadProjectData(p.id);
+  
+  const portalOverlay = document.getElementById('customer-portal-overlay');
+  if (portalOverlay && portalOverlay.classList.contains('active')) {
+    openCustomerPortalSim();
+  }
+
+  alert("Digital signature successfully recorded and saved to project documents!");
 }
 
 // --- SELF-DIAGNOSTICS SUITE ---
@@ -3884,13 +4726,31 @@ function runDiagnostics(options = {}) {
 
   const lockedPickup = {
     stageIndex: 7, quoteStatus: "approved", contractStatus: "signed", paymentStatus: "deposit",
-    depositAmount: 500, inspectionAcknowledged: true, proofs: [{ status: "Approved" }],
+    depositAmount: 500, inspectionAcknowledged: true, preInstallPacketSigned: true, proofs: [{ status: "Approved" }],
     productionChecklist: [{ task: "Laminated", done: true }],
     installChecklist: REQUIRED_INSTALL_TASKS.map(task => ({ task, done: true })), files: []
   };
   check(getWorkflowGateError(lockedPickup).includes("Upload"),
     "Pickup lock requires before, during, and after photos.",
     "Pickup lock did not require the complete photo record.");
+
+  const lockedProdSigned = {
+    stageIndex: 5, quoteStatus: "approved", contractStatus: "signed", paymentStatus: "deposit",
+    depositAmount: 500, inspectionAcknowledged: true, proofs: [{ status: "Approved" }],
+    productionChecklist: [], installChecklist: [], files: [], preInstallPacketSigned: false
+  };
+  check(getWorkflowGateError(lockedProdSigned).includes("Pre-Install") || getWorkflowGateError(lockedProdSigned).includes("pre-install"),
+    "Production release blocks unsigned pre-install packet.",
+    "Production release allowed unsigned pre-install packet.");
+
+  const lockedComplete = {
+    stageIndex: 8, quoteStatus: "approved", contractStatus: "signed", paymentStatus: "deposit",
+    depositAmount: 500, inspectionAcknowledged: true, preInstallPacketSigned: true, proofs: [{ status: "Approved" }],
+    productionChecklist: [], installChecklist: [], files: [], finalPacketSigned: false
+  };
+  check(getWorkflowGateError(lockedComplete).includes("Final") || getWorkflowGateError(lockedComplete).includes("final"),
+    "Job completion blocks unsigned final wrap completion packet.",
+    "Job completion allowed unsigned final wrap completion packet.");
 
   check(typeof updateProjectStage === "function",
     "Workflow stepper handler is wired.",
