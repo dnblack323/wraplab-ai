@@ -697,11 +697,12 @@ function switchDetailTab(tabName) {
   document.querySelectorAll('.detail-tab-panel').forEach(panel => panel.classList.remove('active'));
   
   // Find matching button and panel
-  const targetBtn = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.innerText.toLowerCase().includes(tabName === 'pricing' ? 'pricing' : tabName === 'measurements' ? 'specs' : tabName));
+  const targetBtn = document.querySelector(`.tab-btn[data-detail-tab="${tabName}"]`);
   if (targetBtn) targetBtn.classList.add('active');
   
   const panel = document.getElementById(`tab-${tabName}`);
   if (panel) panel.classList.add('active');
+  renderContextualActions(tabName);
   
   // Custom adjustments for canvas/blueprint displays
   if (tabName === 'inspection') {
@@ -715,6 +716,70 @@ function switchDetailTab(tabName) {
     selectedDamageId = proj.damageMarkers?.[0]?.id || null;
     switchVehicleDiagram(initialTemplate);
   }
+}
+
+const PROJECT_CONTEXT_ACTIONS = {
+  intake: [
+    ['Customer', 'Send Quote', 'fa-paper-plane', "simulateSendCommunication('quote')", 'primary'],
+    ['Customer', 'Send Contract', 'fa-signature', "simulateSendCommunication('contract')"],
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"]
+  ],
+  measurements: [
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"],
+    ['Workflow', 'Mark Stage Complete', 'fa-check', 'markCurrentStageComplete()', 'success']
+  ],
+  pricing: [
+    ['Customer', 'Send Quote', 'fa-paper-plane', "simulateSendCommunication('quote')", 'primary'],
+    ['Customer', 'Send Contract', 'fa-signature', "simulateSendCommunication('contract')"],
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"]
+  ],
+  design: [
+    ['Customer', 'Request Proof Approval', 'fa-wand-magic-sparkles', "simulateSendCommunication('proof')", 'primary'],
+    ['Customer', 'Open Customer Portal', 'fa-user-circle', 'openCustomerPortalSim()', 'success'],
+    ['Workflow', 'Mark Stage Complete', 'fa-check', 'markCurrentStageComplete()', 'success']
+  ],
+  inspection: [
+    ['Documents', 'Pre-Install Packet', 'fa-file-arrow-down', "generateDocument('pre-install-packet')", 'purple'],
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"],
+    ['Workflow', 'Mark Stage Complete', 'fa-check', 'markCurrentStageComplete()', 'success']
+  ],
+  production: [
+    ['Documents', 'Pre-Install Packet', 'fa-file-arrow-down', "generateDocument('pre-install-packet')", 'purple'],
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"],
+    ['Workflow', 'Mark Stage Complete', 'fa-check', 'markCurrentStageComplete()', 'success']
+  ],
+  install: [
+    ['Schedule', 'Schedule Install', 'fa-calendar-days', 'openInstallSchedulingModal()', 'primary'],
+    ['Documents', 'Pre-Install Packet', 'fa-file-arrow-down', "generateDocument('pre-install-packet')", 'purple'],
+    ['Workflow', 'Mark Stage Complete', 'fa-check', 'markCurrentStageComplete()', 'success']
+  ],
+  files: [
+    ['Documents', 'Work Order', 'fa-file-pdf', "generateDocument('packet')"],
+    ['Documents', 'Pre-Install Packet', 'fa-file-arrow-down', "generateDocument('pre-install-packet')", 'purple'],
+    ['Documents', 'Final Completion Packet', 'fa-file-circle-check', "generateDocument('final-packet')", 'success']
+  ],
+  communication: [
+    ['Customer', 'Send Quote', 'fa-paper-plane', "simulateSendCommunication('quote')", 'primary'],
+    ['Customer', 'Send Contract', 'fa-signature', "simulateSendCommunication('contract')"],
+    ['Customer', 'Request Proof Approval', 'fa-wand-magic-sparkles', "simulateSendCommunication('proof')"],
+    ['Customer', 'Open Customer Portal', 'fa-user-circle', 'openCustomerPortalSim()', 'success']
+  ]
+};
+
+function renderContextualActions(tabName = activeDetailTab) {
+  const ribbon = document.getElementById('contextual-action-ribbon');
+  if (!ribbon) return;
+  const actions = PROJECT_CONTEXT_ACTIONS[tabName] || [];
+  const groups = actions.reduce((result, action) => {
+    (result[action[0]] ||= []).push(action);
+    return result;
+  }, {});
+  ribbon.innerHTML = Object.entries(groups).map(([group, items]) => `
+    <div class="ribbon-command-group">
+      <div class="ribbon-command-buttons">${items.map(([, label, icon, handler, tone]) => `<button type="button" class="ribbon-command${tone ? ` is-${tone}` : ''}" onclick="${handler}"><i class="fa-solid ${icon}"></i><span>${label}</span></button>`).join('')}</div>
+      <span class="ribbon-group-label">${group}</span>
+    </div>
+  `).join('');
 }
 
 function getActiveProject() {
@@ -1055,6 +1120,7 @@ function loadProjectData(projectId) {
 
   // Update Stepper graphic
   updateStepperGraphic(p.stageIndex);
+  renderContextualActions(activeDetailTab);
 
   // Load Intake & Vehicle Fields
   document.getElementById('intake-biz-name').value = p.businessName || "";

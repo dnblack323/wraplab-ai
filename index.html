@@ -211,8 +211,25 @@
             </div>
           </div>
 
+          <!-- Project Workspace Tabs -->
+          <div class="tabs-navigation command-center-tabs" role="tablist" aria-label="Project workspace">
+            <button class="tab-btn active" data-detail-tab="intake" onclick="switchDetailTab('intake')"><i class="fa-solid fa-id-card"></i> Intake & Vehicle</button>
+            <button class="tab-btn" data-detail-tab="measurements" onclick="switchDetailTab('measurements')"><i class="fa-solid fa-ruler-combined"></i> Specs & Coverage</button>
+            <button class="tab-btn" data-detail-tab="pricing" onclick="switchDetailTab('pricing')"><i class="fa-solid fa-calculator"></i> Pricing & Cost</button>
+            <button class="tab-btn" data-detail-tab="design" onclick="switchDetailTab('design')"><i class="fa-solid fa-pen-nib"></i> Design & Proofs</button>
+            <button class="tab-btn" data-detail-tab="inspection" onclick="switchDetailTab('inspection')"><i class="fa-solid fa-clipboard-check"></i> Damage Inspection</button>
+            <button class="tab-btn" data-detail-tab="production" onclick="switchDetailTab('production')"><i class="fa-solid fa-print"></i> Production Check</button>
+            <button class="tab-btn" data-detail-tab="install" onclick="switchDetailTab('install')"><i class="fa-solid fa-screwdriver-wrench"></i> Install Log</button>
+            <button class="tab-btn" data-detail-tab="files" onclick="switchDetailTab('files')"><i class="fa-solid fa-folder-open"></i> Photos & Files</button>
+            <button class="tab-btn" data-detail-tab="communication" onclick="switchDetailTab('communication')"><i class="fa-solid fa-comments"></i> Communication</button>
+          </div>
+
+          <!-- Contextual Project Commands -->
+          <div id="contextual-action-ribbon" class="contextual-action-ribbon" aria-live="polite"></div>
+
           <!-- Stepper Progress Tracker -->
-          <div class="stepper-container">
+          <div class="stepper-container project-stage-tracker">
+            <div class="stage-tracker-label">Project stage</div>
             <div class="stepper">
               <div class="stepper-progress-bar" id="project-stepper-progress"></div>
               
@@ -263,33 +280,6 @@
             </div>
           </div>
 
-          <!-- Quick Actions Ribbon -->
-          <div class="action-ribbon">
-            <span style="font-weight: 700; font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted);">Quick Actions:</span>
-            <button class="btn btn-primary" onclick="simulateSendCommunication('quote')"><i class="fa-solid fa-paper-plane"></i> Send Quote</button>
-            <button class="btn" onclick="simulateSendCommunication('proof')"><i class="fa-solid fa-wand-magic-sparkles"></i> Request Proof Approval</button>
-            <button class="btn" onclick="simulateSendCommunication('contract')"><i class="fa-solid fa-signature"></i> Send Contract</button>
-            <button class="btn" onclick="openInstallSchedulingModal()"><i class="fa-solid fa-calendar-days"></i> Schedule Install</button>
-            <button class="btn btn-success" onclick="openCustomerPortalSim()"><i class="fa-solid fa-user-circle"></i> Open Customer Portal</button>
-            <button class="btn" style="background:#5b347f; border-color:#5b347f; color:#ffffff;" onclick="generateDocument('pre-install-packet')"><i class="fa-solid fa-file-arrow-down"></i> Pre-Install Packet</button>
-            <button class="btn" style="background:#1f6b45; border-color:#1f6b45; color:#ffffff;" onclick="generateDocument('final-packet')"><i class="fa-solid fa-file-circle-check"></i> Final Completion Packet</button>
-            <button class="btn" onclick="generateDocument('packet')"><i class="fa-solid fa-file-pdf"></i> Work Order</button>
-            <button class="btn btn-success" onclick="markCurrentStageComplete()"><i class="fa-solid fa-check"></i> Mark Stage Complete</button>
-          </div>
-
-        </div>
-
-        <!-- Detail Tabs Navigation -->
-        <div class="tabs-navigation">
-          <button class="tab-btn active" onclick="switchDetailTab('intake')"><i class="fa-solid fa-id-card"></i> Intake & Vehicle</button>
-          <button class="tab-btn" onclick="switchDetailTab('measurements')"><i class="fa-solid fa-ruler-combined"></i> Specs & Coverage</button>
-          <button class="tab-btn" onclick="switchDetailTab('pricing')"><i class="fa-solid fa-calculator"></i> Pricing & Cost</button>
-          <button class="tab-btn" onclick="switchDetailTab('design')"><i class="fa-solid fa-pen-nib"></i> Design & Proofs</button>
-          <button class="tab-btn" onclick="switchDetailTab('inspection')"><i class="fa-solid fa-clipboard-check"></i> Damage Inspection</button>
-          <button class="tab-btn" onclick="switchDetailTab('production')"><i class="fa-solid fa-print"></i> Production Check</button>
-          <button class="tab-btn" onclick="switchDetailTab('install')"><i class="fa-solid fa-screwdriver-wrench"></i> Install Log</button>
-          <button class="tab-btn" onclick="switchDetailTab('files')"><i class="fa-solid fa-folder-open"></i> Photos & Files</button>
-          <button class="tab-btn" onclick="switchDetailTab('communication')"><i class="fa-solid fa-comments"></i> Communication</button>
         </div>
 
         <!-- TAB 1: INTAKE & VEHICLE -->

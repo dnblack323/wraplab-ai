@@ -58,6 +58,7 @@ const STUDIO_FEEDBACK_TAGS = [
 let studioGenerating = false;
 let studioCompareIds = [];
 let studioEditingConceptId = null;
+let studioViewingConceptId = null;
 
 function studioUid(prefix = 'studio') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -80,6 +81,23 @@ function studioTimestamp() {
   return new Date().toISOString();
 }
 
+function studioFormatPhoneNumber(value) {
+  let digits = String(value || '').replace(/\D/g, '').slice(0, 10);
+  if (digits.length === 7) digits = `555${digits}`;
+  if (digits.length !== 10) return String(value || '');
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function studioDefaultViewsForWrapType(wrapType = '') {
+  const type = String(wrapType).toLowerCase();
+  if (/race/.test(type)) return ['driver', 'passenger', 'front', 'rear', 'three-quarter-front', 'three-quarter-rear'];
+  if (/color change|full vehicle|full wrap/.test(type)) return ['driver', 'passenger', 'front', 'rear', 'three-quarter-front'];
+  if (/trailer/.test(type)) return ['driver', 'passenger', 'rear'];
+  if (/partial|spot graphic/.test(type)) return ['driver', 'passenger', 'three-quarter-front'];
+  if (/commercial|fleet|box truck|food truck|service vehicle/.test(type)) return ['driver', 'passenger', 'rear', 'three-quarter-front'];
+  return ['driver', 'passenger'];
+}
+
 function studioStorageKey(project) {
   return `wrap-lab-ai:mockup-studio:${project.id}`;
 }
@@ -89,7 +107,7 @@ function studioDefaultContent(project) {
   return {
     companyName: { value: project.businessName || `${project.firstName} ${project.lastName}`, mode: 'required' },
     tagline: { value: '', mode: 'optional' },
-    phone: { value: project.phone || copyParts.find(part => /\d{3}/.test(part)) || '', mode: 'required' },
+    phone: { value: studioFormatPhoneNumber(project.phone || copyParts.find(part => /\d{3}/.test(part)) || ''), mode: 'required' },
     website: { value: '', mode: 'optional' },
     social: { value: '', mode: 'exclude' },
     services: { value: copyParts.slice(2).join(', '), mode: 'optional' },
@@ -105,10 +123,11 @@ function studioDefaultContent(project) {
 function studioDefaultState(project) {
   const initialGoal = /trailer/i.test(project.wrapType) ? 'Trailer wrap'
     : /partial/i.test(project.wrapType) ? 'Partial wrap'
+      : /race/i.test(project.wrapType) ? 'Race car wrap'
       : /commercial/i.test(project.wrapType) ? 'Commercial fleet wrap'
         : 'Full vehicle wrap';
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     assets: [],
     vehicle: {
       sourceMode: 'Select stock vehicle template',
@@ -116,7 +135,7 @@ function studioDefaultState(project) {
       year: project.year || '', make: project.make || '', model: project.model || '', trim: project.trim || '',
       cab: '', bedLength: '', roofType: project.roofHeight || '', sideDoors: '', trailerAttached: false,
       existingColor: project.originalColor || '', damageNotes: '', avoidAreas: '', coverAreas: '',
-      requiredViews: ['driver']
+      requiredViews: studioDefaultViewsForWrapType(project.wrapType)
     },
     direction: {
       goal: initialGoal,
@@ -162,8 +181,14 @@ function ensureMockupStudio(project) {
   studio.activities = Array.isArray(studio.activities) ? studio.activities : [];
   studio.designerTasks = Array.isArray(studio.designerTasks) ? studio.designerTasks : [];
   studio.briefs = Array.isArray(studio.briefs) ? studio.briefs : [];
+  if (!studio.schemaVersion || studio.schemaVersion < 2) {
+    studio.vehicle.requiredViews = studioDefaultViewsForWrapType(project.wrapType);
+    studio.direction.content.phone.value = studioFormatPhoneNumber(studio.direction.content.phone.value);
+    studio.schemaVersion = 2;
+    persistMockupStudio(project);
+  }
   studio.vehicle.requiredViews = Array.isArray(studio.vehicle.requiredViews) && studio.vehicle.requiredViews.length
-    ? studio.vehicle.requiredViews : ['driver'];
+    ? studio.vehicle.requiredViews : studioDefaultViewsForWrapType(project.wrapType);
   if (!studio.activities.length) studioLogActivity(project, 'AI Mockup Studio initialized.', false);
   return studio;
 }
@@ -337,8 +362,10 @@ function studioUpdateDirection(field, value) {
   const studio = ensureMockupStudio(project);
   studio.direction[field] = value;
   if (field === 'notes') project.designBrief = value;
+  if (field === 'goal') studio.vehicle.requiredViews = studioDefaultViewsForWrapType(value);
   persistMockupStudio(project);
   if (field === 'notes') renderStudioReferencePreview(project);
+  if (field === 'goal') renderMockupStudio(project);
 }
 
 function studioToggleStyle(style) {
@@ -358,8 +385,11 @@ function studioUpdateContent(field, property, value) {
   const project = getActiveProject();
   if (!project) return;
   const studio = ensureMockupStudio(project);
-  studio.direction.content[field][property] = value;
+  studio.direction.content[field][property] = field === 'phone' && property === 'value'
+    ? studioFormatPhoneNumber(value)
+    : value;
   persistMockupStudio(project);
+  if (field === 'phone' && property === 'value') renderMockupStudio(project);
 }
 
 function studioToggleRule(rule, checked) {
@@ -766,31 +796,33 @@ function renderStudioConceptCards(studio) {
   if (!concepts.length) return '<div class="studio-gallery-empty"><i class="fa-solid fa-images"></i><strong>No concepts generated</strong><span>Configure the batch and generate concepts. Existing project assets remain unchanged.</span></div>';
   return concepts.map(concept => {
     const activeImage = concept.images[concept.activeViewIndex] || concept.images[0];
-    const compareActive = studioCompareIds.includes(concept.id);
     return `<article class="studio-concept-card${concept.selected ? ' selected' : ''}">
-      <div class="studio-concept-image">
-        <img src="${activeImage?.dataUrl || ''}" alt="Concept ${concept.number} ${studioEscape(concept.title)}">
-        <div class="studio-concept-flags"><span>Concept ${concept.number}</span>${concept.favorite ? '<span class="favorite">★ Favorite</span>' : ''}${concept.sentToPortal ? '<span class="sent">Portal</span>' : ''}</div>
-      </div>
-      <div class="studio-concept-body">
-        <div class="studio-concept-heading"><div><strong>${studioEscape(concept.title)}</strong><span>${studioEscape(concept.style)} · V${concept.activeVersion}</span></div><select onchange="studioSelectConceptVersion('${concept.id}',this.value)">${concept.versions.map(version => `<option value="${version.version}"${version.version === concept.activeVersion ? ' selected' : ''}>Version ${version.version}</option>`).join('')}</select></div>
-        <div class="studio-view-tabs">${concept.images.map((image, index) => `<button type="button" class="${index === concept.activeViewIndex ? 'active' : ''}" onclick="studioSetConceptView('${concept.id}',${index})">${studioEscape(image.view.replaceAll('-', ' '))}</button>`).join('')}</div>
-        <p>${studioEscape(concept.explanation)}</p>
-        <div class="studio-meta-line"><strong>Assets:</strong> ${concept.assetRefs.length ? concept.assetRefs.map(ref => studioEscape(ref)).join(', ') : 'Project fields only'}</div>
-        ${concept.protectedRefs.length ? `<div class="studio-protected"><i class="fa-solid fa-lock"></i>Protected: ${concept.protectedRefs.map(ref => studioEscape(ref)).join(', ')}</div>` : ''}
-        ${concept.warnings.map(warning => `<div class="studio-warning"><i class="fa-solid fa-triangle-exclamation"></i>${studioEscape(warning)}</div>`).join('')}
-        <div class="studio-concept-actions">
-          <button type="button" class="${concept.favorite ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','favorite')"><i class="fa-${concept.favorite ? 'solid' : 'regular'} fa-star"></i>Favorite</button>
-          <button type="button" class="${concept.selected ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','selected')"><i class="fa-solid fa-check"></i>Select</button>
-          <button type="button" onclick="openStudioConceptEditor('${concept.id}')"><i class="fa-solid fa-sliders"></i>Refine</button>
-          <button type="button" class="${compareActive ? 'active' : ''}" onclick="studioToggleCompare('${concept.id}')"><i class="fa-solid fa-code-compare"></i>Compare</button>
-          <button type="button" class="${concept.sentToPortal ? 'active' : ''}" onclick="studioSendConceptToPortal('${concept.id}')"><i class="fa-solid fa-paper-plane"></i>Portal</button>
-          <button type="button" onclick="studioToggleConcept('${concept.id}','selected')"><i class="fa-solid fa-file-lines"></i>Brief</button>
-          <button type="button" class="danger" onclick="studioArchiveConcept('${concept.id}')"><i class="fa-solid fa-box-archive"></i>Archive</button>
-        </div>
-      </div>
+      <button type="button" class="studio-concept-open" onclick="openStudioConceptDetails('${concept.id}')" aria-label="Open full details for Concept ${concept.number}: ${studioEscape(concept.title)}">
+        <div class="studio-concept-image"><img src="${activeImage?.dataUrl || ''}" alt="Concept ${concept.number} ${studioEscape(concept.title)}"><div class="studio-concept-flags"><span>Concept ${concept.number}</span>${concept.favorite ? '<span class="favorite">Favorite</span>' : ''}${concept.sentToPortal ? '<span class="sent">Portal</span>' : ''}</div></div>
+        <div class="studio-concept-summary"><div><strong>${studioEscape(concept.title)}</strong><span>${studioEscape(concept.style)} · V${concept.activeVersion}</span></div><p>${studioEscape(concept.explanation)}</p><span class="studio-open-hint">Open full details <i class="fa-solid fa-arrow-up-right-from-square"></i></span></div>
+      </button>
+      <div class="studio-card-quick-actions"><button type="button" class="${concept.favorite ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','favorite')"><i class="fa-${concept.favorite ? 'solid' : 'regular'} fa-star"></i>Favorite</button><button type="button" class="${concept.selected ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','selected')"><i class="fa-solid fa-check"></i>Select</button></div>
     </article>`;
   }).join('');
+}
+
+function openStudioConceptDetails(conceptId) {
+  if (!studioFindConcept(conceptId)) return;
+  studioViewingConceptId = conceptId;
+  renderMockupStudio(getActiveProject());
+}
+
+function closeStudioConceptDetails() {
+  studioViewingConceptId = null;
+  document.getElementById('studio-concept-detail-modal')?.classList.remove('active');
+}
+
+function renderStudioConceptDetailModal(studio) {
+  const concept = studio.concepts.find(item => item.id === studioViewingConceptId && !item.archived);
+  if (!concept) return '<div id="studio-concept-detail-modal" class="studio-modal"></div>';
+  const activeImage = concept.images[concept.activeViewIndex] || concept.images[0];
+  const compareActive = studioCompareIds.includes(concept.id);
+  return `<div id="studio-concept-detail-modal" class="studio-modal active" onclick="if(event.target===this)closeStudioConceptDetails()"><div class="studio-modal-card studio-concept-detail-card"><div class="studio-modal-header"><div><span class="studio-eyebrow">CONCEPT ${concept.number}</span><h3>${studioEscape(concept.title)}</h3></div><button type="button" onclick="closeStudioConceptDetails()" aria-label="Close concept details">×</button></div><div class="studio-concept-detail-layout"><div><div class="studio-concept-detail-image"><img src="${activeImage?.dataUrl || ''}" alt="Concept ${concept.number} ${studioEscape(concept.title)}"></div><div class="studio-view-tabs">${concept.images.map((image, index) => `<button type="button" class="${index === concept.activeViewIndex ? 'active' : ''}" onclick="studioSetConceptView('${concept.id}',${index})">${studioEscape(image.view.replaceAll('-', ' '))}</button>`).join('')}</div></div><div class="studio-concept-detail-copy"><div class="studio-concept-heading"><div><strong>${studioEscape(concept.style)}</strong><span>Version ${concept.activeVersion}</span></div><select aria-label="Concept version" onchange="studioSelectConceptVersion('${concept.id}',this.value)">${concept.versions.map(version => `<option value="${version.version}"${version.version === concept.activeVersion ? ' selected' : ''}>Version ${version.version}</option>`).join('')}</select></div><p>${studioEscape(concept.explanation)}</p><div class="studio-meta-line"><strong>Assets:</strong> ${concept.assetRefs.length ? concept.assetRefs.map(ref => studioEscape(ref)).join(', ') : 'Project fields only'}</div>${concept.protectedRefs.length ? `<div class="studio-protected"><i class="fa-solid fa-lock"></i>Protected: ${concept.protectedRefs.map(ref => studioEscape(ref)).join(', ')}</div>` : ''}${concept.warnings.map(warning => `<div class="studio-warning"><i class="fa-solid fa-triangle-exclamation"></i>${studioEscape(warning)}</div>`).join('')}</div></div><div class="studio-concept-actions studio-concept-detail-actions"><button type="button" class="${concept.favorite ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','favorite')"><i class="fa-${concept.favorite ? 'solid' : 'regular'} fa-star"></i>Favorite</button><button type="button" class="${concept.selected ? 'active' : ''}" onclick="studioToggleConcept('${concept.id}','selected')"><i class="fa-solid fa-check"></i>Select</button><button type="button" onclick="openStudioConceptEditor('${concept.id}')"><i class="fa-solid fa-sliders"></i>Refine</button><button type="button" class="${compareActive ? 'active' : ''}" onclick="studioToggleCompare('${concept.id}')"><i class="fa-solid fa-code-compare"></i>Compare</button><button type="button" class="${concept.sentToPortal ? 'active' : ''}" onclick="studioSendConceptToPortal('${concept.id}')"><i class="fa-solid fa-paper-plane"></i>Portal</button><button type="button" onclick="studioToggleConcept('${concept.id}','selected')"><i class="fa-solid fa-file-lines"></i>Brief</button><button type="button" class="danger" onclick="studioArchiveConcept('${concept.id}')"><i class="fa-solid fa-box-archive"></i>Archive</button></div></div></div>`;
 }
 
 function renderStudioCompareTray(studio) {
@@ -847,13 +879,12 @@ function renderMockupStudio(project = getActiveProject()) {
         <label class="studio-field">Design Notes<textarea class="studio-design-notes" placeholder="Reference assets directly, for example: Use @logo1 exactly and @image2 as inspiration only." oninput="studioUpdateDirection('notes',this.value)">${studioEscape(studio.direction.notes)}</textarea></label>
         <div id="studio-reference-preview" class="studio-reference-preview">${referenceAssets.length ? referenceAssets.map(asset => `<span class="studio-ref-chip">${studioEscape(asset.ref)} · ${studioEscape(asset.name)}</span>`).join('') : '<span class="studio-help">No recognized @asset references in Design Notes.</span>'}</div>
 
-        <details class="studio-details" open><summary>Required Content</summary><div class="studio-details-body studio-content-grid">${STUDIO_CONTENT_FIELDS.map(([key,label]) => { const field = studio.direction.content[key]; return `<div class="studio-content-row"><label>${label}<input value="${studioEscape(field.value)}" onchange="studioUpdateContent('${key}','value',this.value)"></label><select aria-label="${label} inclusion" onchange="studioUpdateContent('${key}','mode',this.value)"><option value="required"${field.mode === 'required' ? ' selected' : ''}>Required</option><option value="optional"${field.mode === 'optional' ? ' selected' : ''}>Optional</option><option value="exclude"${field.mode === 'exclude' ? ' selected' : ''}>Do not include</option></select></div>`; }).join('')}</div></details>
+        <details class="studio-details" open><summary>Required Content</summary><div class="studio-details-body studio-content-grid">${STUDIO_CONTENT_FIELDS.filter(([key]) => key !== 'raceNumber' || studio.direction.goal === 'Race car wrap').map(([key,label]) => { const field = studio.direction.content[key]; const phoneAttrs = key === 'phone' ? ' type="tel" inputmode="tel" placeholder="(555) 555-0144"' : ''; return `<div class="studio-content-row"><label>${label}<input${phoneAttrs} value="${studioEscape(field.value)}" onchange="studioUpdateContent('${key}','value',this.value)"></label><select aria-label="${label} inclusion" onchange="studioUpdateContent('${key}','mode',this.value)"><option value="required"${field.mode === 'required' ? ' selected' : ''}>Required</option><option value="optional"${field.mode === 'optional' ? ' selected' : ''}>Optional</option><option value="exclude"${field.mode === 'exclude' ? ' selected' : ''}>Do not include</option></select></div>`; }).join('')}</div></details>
         <details class="studio-details" open><summary>Brand Rules</summary><div class="studio-details-body studio-rule-list">${STUDIO_BRAND_RULES.map(([key,label]) => `<label><input type="checkbox" ${studio.direction.brandRules[key] ? 'checked' : ''} onchange="studioToggleRule('${key}',this.checked)"><span>${label}</span></label>`).join('')}</div></details>
       </section>
 
       <aside class="studio-column studio-controls-column">
         <div class="studio-section-heading"><div><span>03</span><h4>Generation Controls</h4></div></div>
-        <div class="studio-surprise-card"><i class="fa-solid fa-dice"></i><div><strong>Surprise Me</strong><span>Alternate structures that still preserve protected assets and required content.</span></div><select onchange="studioUpdateSetting('surpriseMode',this.value)"><option value="safe-bold"${studio.settings.surpriseMode === 'safe-bold' ? ' selected' : ''}>One safe + two bold</option><option value="three-unexpected"${studio.settings.surpriseMode === 'three-unexpected' ? ' selected' : ''}>3 unexpected layouts</option><option value="five-unexpected"${studio.settings.surpriseMode === 'five-unexpected' ? ' selected' : ''}>5 unexpected layouts</option><option value="traditional-modern-aggressive"${studio.settings.surpriseMode === 'traditional-modern-aggressive' ? ' selected' : ''}>Traditional + modern + aggressive</option><option value="best-practices">Best practices for vehicle/business</option><option value="customer-appeal">Likely customer appeal</option><option value="readability">Readability and hierarchy</option></select><button type="button" onclick="studioSurpriseMe()"><i class="fa-solid fa-wand-magic-sparkles"></i>Generate Surprise Batch</button></div>
         <div class="studio-control-grid">
           <label>Concepts<input type="number" min="1" max="8" value="${studio.settings.conceptCount}" onchange="studioUpdateSetting('conceptCount',this.value)"></label>
           <label>Views per concept<select onchange="studioUpdateSetting('viewsPerConcept',this.value)"><option value="1"${studio.settings.viewsPerConcept === '1' ? ' selected' : ''}>1</option><option value="2"${studio.settings.viewsPerConcept === '2' ? ' selected' : ''}>2</option><option value="3"${studio.settings.viewsPerConcept === '3' ? ' selected' : ''}>3</option><option value="all"${studio.settings.viewsPerConcept === 'all' ? ' selected' : ''}>All selected</option></select></label>
@@ -867,6 +898,7 @@ function renderMockupStudio(project = getActiveProject()) {
         </div>
         <div id="studio-credit-estimate" class="studio-credit-estimate"><strong>${estimate.images} mockup image${estimate.images === 1 ? '' : 's'}</strong><span>Estimated local credit equivalent: ${estimate.credits}</span></div>
         <button type="button" class="studio-generate-btn" onclick="generateStudioConcepts(false)" ${studioGenerating ? 'disabled' : ''}><i class="fa-solid fa-microchip"></i>${studioGenerating ? 'Generating...' : 'Generate Concepts'}</button>
+        <div class="studio-surprise-card studio-surprise-inline"><i class="fa-solid fa-dice"></i><div><strong>Surprise Me</strong><span>Generate alternate structures while preserving protected assets and required content.</span></div><select onchange="studioUpdateSetting('surpriseMode',this.value)"><option value="safe-bold"${studio.settings.surpriseMode === 'safe-bold' ? ' selected' : ''}>One safe + two bold</option><option value="three-unexpected"${studio.settings.surpriseMode === 'three-unexpected' ? ' selected' : ''}>3 unexpected layouts</option><option value="five-unexpected"${studio.settings.surpriseMode === 'five-unexpected' ? ' selected' : ''}>5 unexpected layouts</option><option value="traditional-modern-aggressive"${studio.settings.surpriseMode === 'traditional-modern-aggressive' ? ' selected' : ''}>Traditional + modern + aggressive</option><option value="best-practices">Best practices for vehicle/business</option><option value="customer-appeal">Likely customer appeal</option><option value="readability">Readability and hierarchy</option></select><button type="button" onclick="studioSurpriseMe()"><i class="fa-solid fa-wand-magic-sparkles"></i>Generate Surprise Batch</button></div>
         <div id="studio-generation-state" class="studio-generation-state"></div>
         <div class="studio-safety-note"><i class="fa-solid fa-circle-info"></i><span>Concepts are not final production artwork. Text, exact logos, coverage, templates, measurements, panel breaks, bleed, and print files require professional design review.</span></div>
         <div class="studio-section-heading compact"><div><span>LOG</span><h4>Activity</h4></div></div><div class="studio-activity-list">${renderStudioActivity(studio)}</div>
@@ -876,6 +908,7 @@ function renderMockupStudio(project = getActiveProject()) {
     ${renderStudioCompareTray(studio)}
     <section class="studio-gallery-section"><div class="studio-gallery-header"><div><span class="studio-eyebrow">RESULTS</span><h3>Concept Gallery</h3><p>Review internally, preserve versions, select directions, and send only chosen concepts to the portal.</p></div><div><button type="button" class="btn" onclick="studioCreateDesignerBrief()"><i class="fa-solid fa-file-circle-check"></i>Create Designer Brief</button><span>${studio.concepts.filter(concept => !concept.archived).length} active concepts</span></div></div><div class="studio-concept-grid">${renderStudioConceptCards(studio)}</div></section>
 
+    ${renderStudioConceptDetailModal(studio)}
     <div id="studio-concept-edit-modal" class="studio-modal"><div class="studio-modal-card"><div class="studio-modal-header"><h3>Refine Concept Without Overwriting</h3><button type="button" onclick="closeStudioConceptEditor()">×</button></div><p>Choose or write an instruction. A new version will be created and the previous version will remain available.</p><div class="studio-quick-refinements">${['Make this cleaner','Make this bolder','Use more red','Use less red','Increase logo size','Move phone number higher','Add more negative space','Make it more premium','Make it easier to read from distance','Keep layout but change color direction','Keep colors but change layout','Generate opposite-side version'].map(instruction => `<button type="button" onclick="document.getElementById('studio-refinement-instruction').value='${instruction.replaceAll("'","\\'")}'">${instruction}</button>`).join('')}</div><textarea id="studio-refinement-instruction"></textarea><div class="studio-modal-actions"><button type="button" class="btn" onclick="closeStudioConceptEditor()">Cancel</button><button type="button" class="btn btn-primary" onclick="applyStudioConceptRefinement()">Create New Version</button></div></div></div>
   `;
   renderStudioReferencePreview(project);
